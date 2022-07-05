@@ -3161,11 +3161,15 @@ public class Analyzer {
    * Mark all slots that are referenced in exprs as materialized.
    * Return the affected Tuples.
    */
-  public Set<TupleDescriptor> materializeSlots(List<Expr> exprs) {
+  public Set<TupleDescriptor> materializeSlots(List<Expr> exprs, boolean areJoinOnConds) {
     List<SlotId> slotIds = new ArrayList<>();
     for (Expr e: exprs) {
       Preconditions.checkState(e.isAnalyzed());
       e.getIds(null, slotIds);
+    }
+    if (areJoinOnConds) {
+      globalState_.descTbl.markSlotsInJoinOnCondsMaterialized(slotIds);
+      return new HashSet<>();
     }
     return globalState_.descTbl.markSlotsMaterialized(slotIds);
   }

@@ -78,7 +78,7 @@ public class UnnestNode extends PlanNode {
     conjuncts_ = orderConjunctsByCost(conjuncts_);
 
     // Unnest is like a scan and must materialize the slots of its conjuncts.
-    analyzer.materializeSlots(conjuncts_);
+    analyzer.materializeSlots(conjuncts_, false);
     computeMemLayout(analyzer);
   }
 

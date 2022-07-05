@@ -61,6 +61,8 @@ public class SlotDescriptor {
   // (and physical layout parameters are invalid)
   private boolean isMaterialized_ = false;
 
+  private Boolean isOnlyInJoinConds_ = null;
+
   // If true, then computeMemLayout() should be recursively called for itemTupleDesc_.
   private boolean materializeRecursively_ = false;
 
@@ -138,6 +140,16 @@ public class SlotDescriptor {
     if (materializeRecursively_) {
       Preconditions.checkState(itemTupleDesc_ != null);
       itemTupleDesc_.materializeSlots();
+    }
+  }
+  public boolean isOnlyInJoinConds() {
+    return isOnlyInJoinConds_ == null ? true : isOnlyInJoinConds_;
+  }
+  public void updateIsOnlyInJoinConds(boolean isInJoinConds) {
+    if (isOnlyInJoinConds_ == null) {
+      isOnlyInJoinConds_ = isInJoinConds;
+    } else {
+      isOnlyInJoinConds_ = isInJoinConds && isOnlyInJoinConds_;
     }
   }
   public boolean isMaterializedRecursively() { return materializeRecursively_; }

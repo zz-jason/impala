@@ -980,7 +980,7 @@ public class HdfsScanNode extends ScanNode {
       }
 
       if (!collectionConjuncts.isEmpty()) {
-        analyzer.materializeSlots(collectionConjuncts);
+        analyzer.materializeSlots(collectionConjuncts, false);
         collectionConjuncts_.put(itemTupleDesc, collectionConjuncts);
         addNotEmptyCollections(collectionConjuncts);
       }

@@ -101,7 +101,7 @@ public class DataSourceScanNode extends ScanNode {
     conjuncts_ = orderConjunctsByCost(conjuncts_);
     computeStats(analyzer);
     // materialize slots in remaining conjuncts_
-    analyzer.materializeSlots(conjuncts_);
+    analyzer.materializeSlots(conjuncts_, false);
     computeMemLayout(analyzer);
     computeScanRangeLocations(analyzer);
   }

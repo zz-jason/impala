@@ -157,7 +157,7 @@ public class KuduScanNode extends ScanNode {
       extractKuduConjuncts(analyzer, client, rpcTable);
 
       // Materialize the slots of the remaining conjuncts (i.e. those not pushed to Kudu)
-      analyzer.materializeSlots(conjuncts_);
+      analyzer.materializeSlots(conjuncts_, false);
 
       // Compute mem layout before the scan range locations because creation of the Kudu
       // scan tokens depends on having a mem layout.

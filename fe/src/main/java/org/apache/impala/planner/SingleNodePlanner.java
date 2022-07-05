@@ -69,6 +69,7 @@ import org.apache.impala.catalog.FeKuduTable;
 import org.apache.impala.catalog.FeTable;
 import org.apache.impala.catalog.HdfsFileFormat;
 import org.apache.impala.catalog.ScalarType;
+import org.apache.impala.catalog.SqlConstraints;
 import org.apache.impala.catalog.TableLoadingException;
 import org.apache.impala.common.AnalysisException;
 import org.apache.impala.common.ImpalaException;
@@ -79,6 +80,7 @@ import org.apache.impala.planner.AnalyticEvalNode.LimitPushdownInfo;
 import org.apache.impala.planner.JoinNode.DistributionMode;
 import org.apache.impala.thrift.TQueryOptions;
 import org.apache.impala.util.AcidUtils;
+import org.apache.hadoop.hive.metastore.api.SQLPrimaryKey;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -161,7 +163,7 @@ public class SingleNodePlanner {
     // if not all output is needed by destination fragment
     // TODO 2: should the materialization decision be cost-based?
     if (queryStmt.getBaseTblResultExprs() != null) {
-      analyzer.materializeSlots(queryStmt.getBaseTblResultExprs());
+      analyzer.materializeSlots(queryStmt.getBaseTblResultExprs(), false);
     }
 
     if (LOG.isTraceEnabled()) {
@@ -671,7 +673,11 @@ public class SingleNodePlanner {
     for (int i = 1; i < parentRefPlans.size(); ++i) {
       TableRef innerRef = parentRefPlans.get(i).first;
       PlanNode innerPlan = parentRefPlans.get(i).second;
-      root = createJoinNode(root, innerPlan, innerRef, analyzer);
+      PlanNode newRoot = createJoinNode(root, innerPlan, innerRef, analyzer);
+      if (newRoot == null) {
+        continue;
+      }
+      root = newRoot;
       if (root != null) root = createSubplan(root, subplanRefs, false, analyzer);
       if (root instanceof SubplanNode) root.getChild(0).setId(ctx_.getNextNodeId());
       root.setId(ctx_.getNextNodeId());
@@ -1403,7 +1409,7 @@ public class SingleNodePlanner {
       // materialized
       List<Expr> substUnassigned = Expr.substituteList(unassignedConjuncts,
           inlineViewRef.getBaseTblSmap(), analyzer, false);
-      analyzer.materializeSlots(substUnassigned);
+      analyzer.materializeSlots(substUnassigned, false);
       return;
     }
 
@@ -1425,7 +1431,7 @@ public class SingleNodePlanner {
     // materialized
     List<Expr> substUnassigned = Expr.substituteList(unassignedConjuncts,
         inlineViewRef.getBaseTblSmap(), analyzer, false);
-    analyzer.materializeSlots(substUnassigned);
+    analyzer.materializeSlots(substUnassigned, false);
   }
 
   /**
@@ -1588,7 +1594,7 @@ public class SingleNodePlanner {
     List<? extends FeFsPartition> partitions = pair.first;
 
     // Mark all slots referenced by the remaining conjuncts as materialized.
-    analyzer.materializeSlots(conjuncts);
+    analyzer.materializeSlots(conjuncts, false);
 
     // TODO: Remove this section, once DATE type is supported across all fileformats.
     // Check if there are any partitions for which DATE is not supported.
@@ -1873,7 +1879,7 @@ public class SingleNodePlanner {
       if (table instanceof FeIcebergTable) {
         FeFsTable feFsTable = ((FeIcebergTable) tblRef.getDesc().getTable()).
             getFeFsTable();
-        analyzer.materializeSlots(conjuncts);
+        analyzer.materializeSlots(conjuncts, false);
         scanNode = new IcebergScanNode(ctx_.getNextNodeId(), tblRef.getDesc(), conjuncts,
             tblRef, feFsTable, aggInfo);
         scanNode.init(analyzer);
@@ -2020,6 +2026,12 @@ public class SingleNodePlanner {
       innerRef.setJoinOp(JoinOperator.INNER_JOIN);
     }
 
+    if (innerRef.getJoinOp() == JoinOperator.LEFT_OUTER_JOIN) {
+      if (canEliminateInnerPlan(analyzer, inner, innerRef, eqJoinConjuncts)) {
+        return null;
+      }
+    }
+
     List<Expr> otherJoinConjuncts = new ArrayList<>();
     if (innerRef.getJoinOp().isOuterJoin()) {
       // Also assign conjuncts from On clause. All remaining unassigned conjuncts
@@ -2081,6 +2093,56 @@ public class SingleNodePlanner {
     result.init(analyzer);
     return result;
   }
+
+   /**
+    * canEliminateInnerPlan() checks whether the given inner join node can be
+    * eliminated in the following situation:
+    * 1. All slots of inner table are only used in the join's on conditions.
+    * 2. The on condition of inner table is the primary key.
+    * @return true if the inner join node can be eliminated.
+    */
+   private boolean canEliminateInnerPlan(Analyzer analyzer, PlanNode innerPlan,
+       TableRef innerRef, List<BinaryPredicate> eqJoinConjuncts) {
+     List<TupleId> innerTblRefIds = Lists.newArrayList(innerPlan.getTblRefIds());
+
+     // Check whether the output of the inner plan is not used by any outer join.
+     for (int i = 0; i < innerTblRefIds.size(); ++i) {
+       TupleDescriptor desc = analyzer.getTupleDesc(innerTblRefIds.get(i));
+       for (int j = 0; j < desc.getSlots().size(); ++j) {
+        if (!desc.getSlots().get(j).isOnlyInJoinConds()) {
+          return false;
+        }
+      }
+     }
+
+    // Collect all the slots used in the equal on condition of the inner plan.
+    Iterator<BinaryPredicate> conjunctIter = eqJoinConjuncts.iterator();
+    Set<String> innerSlotsInOnConds = new HashSet<>();
+    while (conjunctIter.hasNext()) {
+      Expr conjunct = conjunctIter.next();
+      if (!(conjunct instanceof BinaryPredicate)) {
+        return false;
+      }
+      BinaryPredicate eq = (BinaryPredicate) conjunct;
+      SlotRef innerSlotRef = eq.getChild(1).unwrapSlotRef(true);
+      innerSlotsInOnConds.add(innerSlotRef.getDesc().getPath().destColumn().getName());
+    }
+
+    // Check whether all slots in innerSlotsInOnConds are in the primary key.
+    List<SQLPrimaryKey> pks =
+        innerRef.getResolvedPath().destTable().getSqlConstraints().getPrimaryKeys();
+    if (pks.size() != innerSlotsInOnConds.size()) {
+      return false;
+    }
+    for (SQLPrimaryKey pk : pks) {
+      if (!innerSlotsInOnConds.contains(pk.getColumn_name())) {
+          return false;
+      }
+    }
+
+    return true;
+   }
+
 
   /**
    * Optionally add a aggregation node on top of 'joinInput' if it is cheaper to project
@@ -2296,7 +2358,7 @@ public class SingleNodePlanner {
       analyzer.markConjunctsAssigned(conjuncts);
     } else {
       // mark slots referenced by the yet-unassigned conjuncts
-      analyzer.materializeSlots(conjuncts);
+      analyzer.materializeSlots(conjuncts, false);
     }
     // mark slots after predicate propagation but prior to plan tree generation
     unionStmt.materializeRequiredSlots(analyzer);

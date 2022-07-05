@@ -132,6 +132,13 @@ public class DescriptorTable {
     getReferencedPartitions(table).add(Long.valueOf(partitionId));
   }
 
+  public void markSlotsInJoinOnCondsMaterialized(List<SlotId> joinOnCondIds) {
+    for (SlotId joinOnCondId: joinOnCondIds) {
+      getSlotDesc(joinOnCondId).setIsMaterialized(true);
+      getSlotDesc(joinOnCondId).updateIsOnlyInJoinConds(true);
+    }
+  }
+
   /**
    * Marks all slots in list as materialized and return the affected Tuples.
    */

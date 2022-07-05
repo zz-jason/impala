@@ -230,7 +230,7 @@ public abstract class JoinNode extends PlanNode {
     // Mark slots used by 'conjuncts_' as materialized after substitution. Recompute
     // memory layout for affected tuples. Note: only tuples of the masked tables could
     // be affected if they are referenced by multi-tuple predicates.
-    for (TupleDescriptor tuple : analyzer.materializeSlots(conjuncts_)) {
+    for (TupleDescriptor tuple : analyzer.materializeSlots(conjuncts_, true)) {
       if (LOG.isTraceEnabled()) {
         LOG.trace("Recompute mem layout for " + tuple.debugString());
       }

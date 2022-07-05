@@ -151,7 +151,7 @@ public class HBaseScanNode extends ScanNode {
     createHBaseFilters(analyzer);
 
     // materialize slots in remaining conjuncts_
-    analyzer.materializeSlots(conjuncts_);
+    analyzer.materializeSlots(conjuncts_, false);
     computeMemLayout(analyzer);
     computeScanRangeLocations(analyzer);
     Preconditions.checkState(!scanRangeSpecs_.isSetSplit_specs());
@@ -423,7 +423,7 @@ public class HBaseScanNode extends ScanNode {
             (byte) hbaseOp.ordinal(), literal.getUnescapedValue());
         thbf.setQualifier(col.getColumnQualifier());
         filters_.add(thbf);
-        analyzer.materializeSlots(Lists.newArrayList(e));
+        analyzer.materializeSlots(Lists.newArrayList(e), false);
       }
     }
   }

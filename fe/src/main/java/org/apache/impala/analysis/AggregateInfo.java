@@ -597,7 +597,7 @@ public class AggregateInfo extends AggregateInfoBase {
       materializedSlots_.add(i);
     }
     List<Expr> resolvedExprs = Expr.substituteList(exprs, smap, analyzer, false);
-    analyzer.materializeSlots(resolvedExprs);
+    analyzer.materializeSlots(resolvedExprs, false);
 
     if (isDistinctAgg()) {
       secondPhaseDistinctAggInfo_.materializeRequiredSlots(analyzer, null);
